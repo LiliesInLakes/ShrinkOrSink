@@ -7,6 +7,7 @@ import torchvision.transforms as transforms
 from torchsummary import summary
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 
 device = torch.device("cpu")
 if torch.cuda.is_available():
@@ -14,6 +15,22 @@ if torch.cuda.is_available():
 elif torch.backends.mps.is_built() and torch.backends.mps.is_available():
     device = torch.device("mps")
 print(device)
+
+#SEEDING
+
+def set_seed(seed_value):
+    torch.manual_seed(seed_value)
+    np.random.seed(seed_value)
+    random.seed(seed_value)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed_value)
+        torch.cuda.manual_seed_all(seed_value)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+SEED = 42
+set_seed(SEED)
+print(f"Manual seed set to {SEED}")
 
 train_transform = transforms.Compose([
     transforms.RandomHorizontalFlip(p=0.5),      # Flip images left-to-right
@@ -168,7 +185,8 @@ buffer_size = 0
 size_all_mb = (param_size + buffer_size) / 1024**2
 print(f'Model size: {size_all_mb:.3f}MB')
 
-print('semi supervsed now')
+#SAVING MODEL TO SAVE RUNTIME
+
 
 
 threshold = 0.95  # Only "trust" the model if it's 95% sure
