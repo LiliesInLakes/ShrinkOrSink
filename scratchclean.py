@@ -21,19 +21,24 @@ train_transform = transforms.Compose([
     transforms.RandomResizedCrop(96, scale=(0.8, 1.0)), # Zoom in slightly
     transforms.ColorJitter(brightness=0.2),      # Change brightness
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # Standardize
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # Standardize
 ])
 test_transform = transforms.Compose([
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(
-        (0.5, 0.5, 0.5),
-        (0.5, 0.5, 0.5)
-    )
-])
+# transform = transforms.Compose([
+#     transforms.ToTensor(),
+#     transforms.Normalize(
+#         (0.5, 0.5, 0.5),
+#         (0.5, 0.5, 0.5)
+#     )
+# ])
+# Add this where you load train_set and test_set
+unlabeled_set = torchvision.datasets.STL10(root='./data', split='unlabeled', download=True, transform=train_transform)
+
+# Use a larger batch size for unlabeled data to speed things up
+unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True)
 
 train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
 test_set = torchvision.datasets.STL10(root='./data', split= 'test', download=True, transform=test_transform)
@@ -107,7 +112,7 @@ for epoch in range(epochs):
         optimizer.step()
 
         running_loss += loss.item()
-        if i % 15 == 1:
+        if i % 30 == 1:
             print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
 print('Finished Training')
@@ -137,6 +142,98 @@ with torch.no_grad():
 
 probabilities = torch.exp(log_probabilities).squeeze().cpu()
 view_classification(image, probabilities)
+correct = 0
+total = 0
+
+with torch.no_grad():
+    for data in test_loader:
+        images, labels = data[0].to(device), data[1].to(device)
+
+        outputs = net(images)
+
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
+
+param_size = 0
+for param in net.parameters():
+    param_size += param.nelement() * param.element_size()
+
+buffer_size = 0
+# for buffer in next.buffers():
+#     buffer_size += buffer.nelement() * buffer.element_size()
+
+size_all_mb = (param_size + buffer_size) / 1024**2
+print(f'Model size: {size_all_mb:.3f}MB')
+
+print('semi supervsed now')
+
+
+threshold = 0.95  # Only "trust" the model if it's 95% sure
+unlabeled_iter = iter(unlabeled_loader)
+
+epochs_semi= 100
+for epoch in range(epochs_semi):
+    net.train()
+    for i, (l_inputs, l_labels) in enumerate(train_loader):
+        l_inputs, l_labels = l_inputs.to(device), l_labels.to(device)
+        
+        optimizer.zero_grad()
+
+        # 1. SUPERVISED LOSS
+        outputs = net(l_inputs)
+        supervised_loss = loss_function(outputs, l_labels)
+
+        # 2. SEMI-SUPERVISED LOSS
+        try:
+            u_inputs, _ = next(unlabeled_iter)
+        except StopIteration:
+            unlabeled_iter = iter(unlabeled_loader)
+            u_inputs, _ = next(unlabeled_iter)
+        
+        u_inputs = u_inputs.to(device)
+        
+        # Get "Pseudo-Labels" (No Gradients for the guessing part)
+        with torch.no_grad():
+            u_outputs = net(u_inputs)
+            probs = torch.softmax(u_outputs, dim=1)
+            max_probs, pseudo_labels = torch.max(probs, dim=1)
+            mask = max_probs > threshold  # Only keep high confidence
+        
+        if mask.any():
+            # Calculate loss for the unlabeled images we are sure about
+            u_outputs_final = net(u_inputs[mask])
+            unlabeled_loss = loss_function(u_outputs_final, pseudo_labels[mask])
+            
+            # Combine losses
+            total_loss = supervised_loss + (0.5 * unlabeled_loss)
+        else:
+            total_loss = supervised_loss
+        if i % 30 == 1:
+            print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {supervised_loss.item() :.4f}')
+
+#this is to prevent overfitting, it will stop training once loss is no becoming less
+        best_val_loss = float('inf')
+        patience = 10
+        counter = 0
+
+        # Inside your epoch loop:
+        if total_loss.item() < best_val_loss:
+            best_val_loss = total_loss.item()
+            torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+            counter = 0
+        else:
+            counter += 1
+            if counter >= patience:
+                print("Stopping early to prevent overfitting!")
+                break
+
+
+        total_loss.backward()
+        optimizer.step()
+
 correct = 0
 total = 0
 
