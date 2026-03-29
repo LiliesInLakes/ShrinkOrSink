@@ -120,6 +120,9 @@ optimizer = optim.Adam(net.parameters(), lr=0.001)
 cutmix = v2.CutMix(num_classes=10)
 mixup = v2.MixUp(num_classes=10)
 epochs = 50
+best_val_loss = float('inf')
+patience = 10
+counter = 0
 for epoch in range(epochs):
 
     running_loss = 0.0
@@ -127,11 +130,11 @@ for epoch in range(epochs):
         inputs, labels = data[0].to(device), data[1].to(device)
 
         optimizer.zero_grad()
-        if np.random.rand() < 0.5:
+        if epoch>19 and np.random.rand() < 0.5:
             
             cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
             inputs, labels = cutmix_or_mixup(inputs, labels)
-            outputs = net(inputs)
+            # outputs = net(inputs)
             # if i==0:
             #     img = inputs[0].permute(1, 2, 0).cpu().numpy() 
             #     plt.imshow(img)
@@ -149,9 +152,6 @@ for epoch in range(epochs):
         if i % 30 == 1:
             print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
-    best_val_loss = float('inf')
-    patience = 10
-    counter = 0
 
         # Inside your epoch loop:
     if loss.item() < best_val_loss:
@@ -207,6 +207,24 @@ with torch.no_grad():
         correct += (predicted == labels).sum().item()
 
 print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
+# correct = 0
+# total = 0
+
+# for images, labels in train_loader:
+#     outputs = net(images)
+
+#     # Get the index of the highest log-probability (the predicted class)
+#     _, predicted = torch.max(outputs.data, 1)
+
+#     # Total number of labels
+#     total += labels.size(0)
+
+#     # Total correct predictions
+#     correct += (predicted == labels).sum().item()
+
+# # Calculate accuracy percentage
+# train_accuracy = 100 * correct / total
+# print(f'Training Accuracy for testing underfitting: {train_accuracy:.2f}%')
 
 param_size = 0
 for param in net.parameters():
@@ -222,10 +240,14 @@ print(f'Model size: {size_all_mb:.3f}MB')
 #SAVING MODEL TO SAVE RUNTIME
 
 
-threshold = 0.95  # Only "trust" the model if it's 95% sure
+threshold = 0.98  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
 epochs_semi= 50
+best_val_loss = float('inf')
+patience = 10
+counter = 0
+
 for epoch in range(epochs_semi):
     net.train()
     for i, (l_inputs, l_labels) in enumerate(train_loader):
@@ -268,10 +290,7 @@ for epoch in range(epochs_semi):
         total_loss.backward()
         optimizer.step()
     #this is to prevent overfitting, it will stop training once loss is no becoming less
-    best_val_loss = float('inf')
-    patience = 10
-    counter = 0
-
+    
         # Inside your epoch loop:
     if total_loss.item() < best_val_loss:
         best_val_loss = total_loss.item()

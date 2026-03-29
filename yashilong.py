@@ -130,7 +130,7 @@ optimizer = optim.Adam(net.parameters(), lr=0.001)
 cutmix = v2.CutMix(num_classes=10)
 mixup = v2.MixUp(num_classes=10)
 
-epochs = 70
+epochs = 30
 for epoch in range(epochs):
 
     running_loss = 0.0
@@ -156,6 +156,20 @@ for epoch in range(epochs):
         if i % 75 == 1:
             print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss :.3f}')
             running_loss = 0.0
+    # best_val_loss = float('inf')
+    # patience = 10
+    # counter = 0
+
+    #     # Inside your epoch loop:
+    # if loss.item() < best_val_loss:
+    #     best_val_loss = loss.item()
+    #     torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+    #     counter = 0
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print("Stopping early to prevent overfitting!")
+    #         break
 
 print('Finished Training')
 
@@ -216,12 +230,11 @@ size_all_mb = (param_size) / 1024**2
 print(f'Model size: {size_all_mb:.3f}MB')
 
 
-quit()
 
 threshold = 0.95  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
-epochs_semi= 10
+epochs_semi= 50
 for epoch in range(epochs_semi):
     net.train()
     for i, (l_inputs, l_labels) in enumerate(train_loader):
@@ -261,25 +274,24 @@ for epoch in range(epochs_semi):
         if i % 500 == 1:
             print(f'[{epoch + 1}/{epochs_semi}, {i + 1:5d}] loss: {supervised_loss.item() :.4f}')
 
-#this is to prevent overfitting, it will stop training once loss is no becoming less
-        best_val_loss = float('inf')
-        patience = 10
-        counter = 0
-
-        # Inside your epoch loop:
-        if total_loss.item() < best_val_loss:
-            best_val_loss = total_loss.item()
-            torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
-            counter = 0
-        else:
-            counter += 1
-            if counter >= patience:
-                print("Stopping early to prevent overfitting!")
-                break
-
 
         total_loss.backward()
         optimizer.step()
+    #this is to prevent overfitting, it will stop training once loss is no becoming less
+    # best_val_loss = float('inf')
+    # patience = 10
+    # counter = 0
+
+    # # Inside your epoch loop:
+    # if total_loss.item() < best_val_loss:
+    #     best_val_loss = total_loss.item()
+    #     torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+    #     counter = 0
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print("Stopping early to prevent overfitting!")
+    #         break
 
 correct = 0
 total = 0
