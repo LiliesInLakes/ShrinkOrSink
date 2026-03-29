@@ -8,6 +8,8 @@ from torchsummary import summary
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+from torchvision.transforms import v2
+
 
 device = torch.device("cpu")
 if torch.cuda.is_available():
@@ -63,6 +65,7 @@ test_set = torchvision.datasets.STL10(root='./data', split= 'test', download=Tru
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=32, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_set, batch_size=32,shuffle=False)
 
+
 classes = ('airplane', 'bird', 'car', 'cat', 'deer', 'dog', 'horse', 'monkey', 'ship', 'truck')
 class ConvNeuralNet(nn.Module):
     def __init__(self):
@@ -114,6 +117,8 @@ net.to(device)
 loss_function = nn.CrossEntropyLoss()
 optimizer = optim.Adam(net.parameters(), lr=0.001)
 
+cutmix = v2.CutMix(num_classes=10)
+mixup = v2.MixUp(num_classes=10)
 epochs = 50
 for epoch in range(epochs):
 
@@ -122,9 +127,21 @@ for epoch in range(epochs):
         inputs, labels = data[0].to(device), data[1].to(device)
 
         optimizer.zero_grad()
+        if np.random.rand() < 0.5:
+            
+            cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
+            inputs, labels = cutmix_or_mixup(inputs, labels)
+            outputs = net(inputs)
+            # if i==0:
+            #     img = inputs[0].permute(1, 2, 0).cpu().numpy() 
+            #     plt.imshow(img)
+            #     plt.title("Lam")
+            #     plt.show()
+    # <rest of the training loop here>
+
+
         outputs = net(inputs)
         loss = loss_function(outputs, labels)
-
         loss.backward()
         optimizer.step()
 
@@ -132,7 +149,24 @@ for epoch in range(epochs):
         if i % 30 == 1:
             print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
+    best_val_loss = float('inf')
+    patience = 10
+    counter = 0
+
+        # Inside your epoch loop:
+    if loss.item() < best_val_loss:
+        best_val_loss = loss.item()
+        torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+        counter = 0
+    else:
+        counter += 1
+        if counter >= patience:
+            print("Stopping early to prevent overfitting!")
+            break
+
+
 print('Finished Training')
+
 
 def view_classification(image, probabilities):
     probabilities = probabilities.data.numpy().squeeze()
@@ -188,11 +222,10 @@ print(f'Model size: {size_all_mb:.3f}MB')
 #SAVING MODEL TO SAVE RUNTIME
 
 
-
 threshold = 0.95  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
-epochs_semi= 100
+epochs_semi= 50
 for epoch in range(epochs_semi):
     net.train()
     for i, (l_inputs, l_labels) in enumerate(train_loader):
@@ -230,27 +263,25 @@ for epoch in range(epochs_semi):
         else:
             total_loss = supervised_loss
         if i % 30 == 1:
-            print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {supervised_loss.item() :.4f}')
-
-#this is to prevent overfitting, it will stop training once loss is no becoming less
-        best_val_loss = float('inf')
-        patience = 10
-        counter = 0
-
-        # Inside your epoch loop:
-        if total_loss.item() < best_val_loss:
-            best_val_loss = total_loss.item()
-            torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
-            counter = 0
-        else:
-            counter += 1
-            if counter >= patience:
-                print("Stopping early to prevent overfitting!")
-                break
-
+            print(f'[{epoch + 1}/{epochs_semi}, {i + 1:5d}] loss: {supervised_loss.item() :.4f}')
 
         total_loss.backward()
         optimizer.step()
+    #this is to prevent overfitting, it will stop training once loss is no becoming less
+    best_val_loss = float('inf')
+    patience = 10
+    counter = 0
+
+        # Inside your epoch loop:
+    if total_loss.item() < best_val_loss:
+        best_val_loss = total_loss.item()
+        torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+        counter = 0
+    else:
+        counter += 1
+        if counter >= patience:
+            print("Stopping early to prevent overfitting!")
+            break
 
 correct = 0
 total = 0
