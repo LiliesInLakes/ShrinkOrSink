@@ -9,6 +9,7 @@ from torchsummary import summary
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+from torchvision.transforms import v2
 
 device = torch.device("cpu")
 if torch.cuda.is_available():
@@ -123,9 +124,13 @@ net.to(device)
 
 
 loss_function = nn.NLLLoss()
+criterion= nn.CrossEntropyLoss()
 optimizer = optim.Adam(net.parameters(), lr=0.001)
 
-epochs = 50
+cutmix = v2.CutMix(num_classes=10)
+mixup = v2.MixUp(num_classes=10)
+
+epochs = 70
 for epoch in range(epochs):
 
     running_loss = 0.0
@@ -133,8 +138,16 @@ for epoch in range(epochs):
         inputs, labels = data[0].to(device), data[1].to(device)
 
         optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = loss_function(outputs, labels)
+        if np.random.rand() < 0.5:
+            
+            cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
+            inputs, labels = cutmix_or_mixup(inputs, labels)
+            outputs = net(inputs)
+            outputs = net(inputs)
+            loss = criterion(outputs, labels)
+        else:
+            outputs = net(inputs)
+            loss = loss_function(outputs, labels)
 
         loss.backward()
         optimizer.step()
@@ -202,10 +215,13 @@ for param in net.parameters():
 size_all_mb = (param_size) / 1024**2
 print(f'Model size: {size_all_mb:.3f}MB')
 
+
+quit()
+
 threshold = 0.95  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
-epochs_semi= 100
+epochs_semi= 10
 for epoch in range(epochs_semi):
     net.train()
     for i, (l_inputs, l_labels) in enumerate(train_loader):
