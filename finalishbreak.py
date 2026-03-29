@@ -58,7 +58,7 @@ test_transform = transforms.Compose([
 unlabeled_set = torchvision.datasets.STL10(root='./data', split='unlabeled', download=True, transform=train_transform)
 
 # Use a larger batch size for unlabeled data to speed things up
-unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True)
+unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=128, shuffle=True, num_workers=2)
 
 train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
 test_set = torchvision.datasets.STL10(root='./data', split= 'test', download=True, transform=test_transform)
@@ -105,19 +105,22 @@ optimizer = optim.Adam(net.parameters(), lr=0.001)
 
 cutmix = v2.CutMix(num_classes=10)
 mixup = v2.MixUp(num_classes=10)
-epochs = 50
+epochs = 100
 best_val_loss = float('inf')
 patience = 10
 counter = 0
+check=0
+print('starting training for supervised')
 for epoch in range(epochs):
-
+    if(epoch==50):
+        check=1
     running_loss = 0.0
     for i, data in enumerate(train_loader):
         inputs, labels = data[0].to(device), data[1].to(device)
 
         optimizer.zero_grad()
-        if epoch>19 and np.random.rand() < 0.5:
-            
+        if check==1:
+            print("doing cutmix now")
             cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
             inputs, labels = cutmix_or_mixup(inputs, labels)
             # outputs = net(inputs)
@@ -148,7 +151,13 @@ for epoch in range(epochs):
         counter += 1
         if counter >= patience:
             print("Stopping early to prevent overfitting!")
-            break
+            if(check==0):
+                check =1
+                print('epochs are now more than 50')
+                counter=0
+            else:
+                print('breaking loop')
+                break
 
 
 print('Finished Training for supervised')
@@ -227,7 +236,7 @@ print(f'Model size: {size_all_mb:.3f}MB')
 threshold = 0.98  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
-epochs_semi= 50
+epochs_semi= 100
 best_val_loss = float('inf')
 patience = 10
 counter = 0

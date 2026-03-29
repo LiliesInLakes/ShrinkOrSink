@@ -116,7 +116,7 @@ for epoch in range(epochs):
         inputs, labels = data[0].to(device), data[1].to(device)
 
         optimizer.zero_grad()
-        if epoch>19 and np.random.rand() < 0.5:
+        if np.random.rand() < 0.5:
             
             cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
             inputs, labels = cutmix_or_mixup(inputs, labels)
@@ -135,9 +135,9 @@ for epoch in range(epochs):
         optimizer.step()
 
         running_loss += loss.item()
-        if i % 50 == 1:
-            print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss :.3f}')
-            #running_loss = 0.0
+        if i % 30 == 1:
+            print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            running_loss = 0.0
 
         # Inside your epoch loop:
     if loss.item() < best_val_loss:
@@ -151,36 +151,34 @@ for epoch in range(epochs):
             break
 
 
-print('Finished Training for supervised')
+print('Finished Training')
 
 
-# def view_classification(image, probabilities):
-#     probabilities = probabilities.data.numpy().squeeze()
+def view_classification(image, probabilities):
+    probabilities = probabilities.data.numpy().squeeze()
 
-#     fig, (ax1, ax2) = plt.subplots(figsize=(6,9), ncols=2)
+    fig, (ax1, ax2) = plt.subplots(figsize=(6,9), ncols=2)
 
-#     image = image.permute(1, 2, 0)
-#     denormalized_image= image / 2 + 0.5
-#     ax1.imshow(denormalized_image)
-#     ax1.axis('off')
-#     ax2.barh(np.arange(10), probabilities)
-#     ax2.set_aspect(0.1)
-#     ax2.set_yticks(np.arange(10))
-#     ax2.set_yticklabels(classes)
-#     ax2.set_title('Class Probability')
-#     ax2.set_xlim(0, 1.1)
-#     plt.tight_layout()
-# images, _ = next(iter(test_loader))
+    image = image.permute(1, 2, 0)
+    denormalized_image= image / 2 + 0.5
+    ax1.imshow(denormalized_image)
+    ax1.axis('off')
+    ax2.barh(np.arange(10), probabilities)
+    ax2.set_aspect(0.1)
+    ax2.set_yticks(np.arange(10))
+    ax2.set_yticklabels(classes)
+    ax2.set_title('Class Probability')
+    ax2.set_xlim(0, 1.1)
+    plt.tight_layout()
+images, _ = next(iter(test_loader))
 
-# image = images[3]
-# batched_image = image.unsqueeze(0).to(device)
-# with torch.no_grad():
-#     log_probabilities = net(batched_image)
+image = images[3]
+batched_image = image.unsqueeze(0).to(device)
+with torch.no_grad():
+    log_probabilities = net(batched_image)
 
-# probabilities = torch.exp(log_probabilities).squeeze().cpu()
-# view_classification(image, probabilities)
-
-#checking accuracy
+probabilities = torch.exp(log_probabilities).squeeze().cpu()
+view_classification(image, probabilities)
 correct = 0
 total = 0
 
@@ -211,7 +209,7 @@ print(f'Accuracy of the network on the 10000 test images: {100 * correct // tota
 # train_accuracy = 100 * correct / total
 # print(f'Training Accuracy for testing underfitting: {train_accuracy:.2f}%')
 
-#checking size
+
 param_size = 0
 for param in net.parameters():
     param_size += param.nelement() * param.element_size()
@@ -223,6 +221,8 @@ buffer_size = 0
 size_all_mb = (param_size + buffer_size) / 1024**2
 print(f'Model size: {size_all_mb:.3f}MB')
 
+#SAVING MODEL TO SAVE RUNTIME
+
 
 threshold = 0.98  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
@@ -231,8 +231,6 @@ epochs_semi= 50
 best_val_loss = float('inf')
 patience = 10
 counter = 0
-running_loss_for_sei=0
-print('starting train loop for semi supervised')
 for epoch in range(epochs_semi):
     net.train()
     for i, (l_inputs, l_labels) in enumerate(train_loader):
@@ -269,18 +267,15 @@ for epoch in range(epochs_semi):
             total_loss = supervised_loss + (0.5 * unlabeled_loss)
         else:
             total_loss = supervised_loss
+        if i % 30 == 1:
+            print(f'[{epoch + 1}/{epochs_semi}, {i + 1:5d}] loss: {supervised_loss.item() :.4f}')
+
         total_loss.backward()
         optimizer.step()
-
-        running_loss_for_sei+=total_loss.item()
-        if i % 520 == 1:
-            print(f'[{epoch + 1}/{epochs_semi}, {i + 1:5d}] loss: {running_loss_for_sei :.4f}')
-            running_loss_for_sei = 0.0
-
-        
     #this is to prevent overfitting, it will stop training once loss is no becoming less
     
 
+        # Inside your epoch loop:
     if total_loss.item() < best_val_loss:
         best_val_loss = total_loss.item()
         torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
