@@ -58,7 +58,7 @@ test_transform = transforms.Compose([
 unlabeled_set = torchvision.datasets.STL10(root='./data', split='unlabeled', download=True, transform=train_transform)
 
 # Use a larger batch size for unlabeled data to speed things up
-unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True)
+unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True, num_workers= 2)
 
 train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
 test_set = torchvision.datasets.STL10(root='./data', split= 'test', download=True, transform=test_transform)
@@ -140,15 +140,15 @@ for epoch in range(epochs):
             running_loss = 0.0
 
         # Inside your epoch loop:
-    if loss.item() < best_val_loss:
-        best_val_loss = loss.item()
-        torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
-        counter = 0
-    else:
-        counter += 1
-        if counter >= patience:
-            print("Stopping early to prevent overfitting!")
-            break
+    # if loss.item() < best_val_loss:
+    #     best_val_loss = loss.item()
+    #     torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+    #     counter = 0
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print("Stopping early to prevent overfitting!")
+    #         break
 
 
 print('Finished Training')
@@ -276,15 +276,15 @@ for epoch in range(epochs_semi):
     
 
         # Inside your epoch loop:
-    if total_loss.item() < best_val_loss:
-        best_val_loss = total_loss.item()
-        torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
-        counter = 0
-    else:
-        counter += 1
-        if counter >= patience:
-            print("Stopping early to prevent overfitting!")
-            break
+    # if total_loss.item() < best_val_loss:
+    #     best_val_loss = total_loss.item()
+    #     torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+    #     counter = 0
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print("Stopping early to prevent overfitting!")
+    #         break
 
 correct = 0
 total = 0
