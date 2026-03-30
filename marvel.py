@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 from torchvision.transforms import v2
+import torch.nn.utils.prune as prune
 
 
 device = torch.device("cpu")
@@ -47,23 +48,22 @@ test_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
-# transform = transforms.Compose([
-#     transforms.ToTensor(),
-#     transforms.Normalize(
-#         (0.5, 0.5, 0.5),
-#         (0.5, 0.5, 0.5)
-#     )
-# ])
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
 # Add this where you load train_set and test_set
 unlabeled_set = torchvision.datasets.STL10(root='./data', split='unlabeled', download=True, transform=train_transform)
 
 # Use a larger batch size for unlabeled data to speed things up
-unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True, num_workers= 2)
+unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True)
 
-train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
+train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform= transform)
+train_set_aug= torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
 test_set = torchvision.datasets.STL10(root='./data', split= 'test', download=True, transform=test_transform)
 
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=32, shuffle=True)
+train_loader_aug = torch.utils.data.DataLoader(train_set_aug, batch_size=32, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_set, batch_size=32,shuffle=False)
 
 
@@ -105,14 +105,101 @@ optimizer = optim.Adam(net.parameters(), lr=0.001)
 
 cutmix = v2.CutMix(num_classes=10)
 mixup = v2.MixUp(num_classes=10)
-epochs = 50
+epochs_plain = 20
+epochs_aug= 20
+epochs_cutmix= 20
 best_val_loss = float('inf')
 patience = 10
 counter = 0
-for epoch in range(epochs):
+for epoch in range(epochs_plain):
 
     running_loss = 0.0
     for i, data in enumerate(train_loader):
+        inputs, labels = data[0].to(device), data[1].to(device)
+
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = loss_function(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if i % 30 == 1:
+            print(f'[{epoch + 1}/{epochs_plain}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            running_loss = 0.0
+
+        # Inside your epoch loop:
+    # if loss.item() < best_val_loss:
+    #     best_val_loss = loss.item()
+    #     torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+    #     counter = 0
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print("Stopping early to prevent overfitting!")
+    #         break
+
+correct = 0
+total = 0
+with torch.no_grad():
+    for data in test_loader:
+        images, labels = data[0].to(device), data[1].to(device)
+
+        outputs = net(images)
+
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f'Accuracy of the network after plain test images: {100 * correct // total} %')
+
+for epoch in range(epochs_aug):
+
+    running_loss = 0.0
+    for i, data in enumerate(train_loader_aug):
+        inputs, labels = data[0].to(device), data[1].to(device)
+
+        optimizer.zero_grad()
+        
+        outputs = net(inputs)
+        loss = loss_function(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if i % 30 == 1:
+            print(f'[{epoch + 1}/{epochs_aug}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            running_loss = 0.0
+
+        # Inside your epoch loop:
+    # if loss.item() < best_val_loss:
+    #     best_val_loss = loss.item()
+    #     torch.save(net.state_dict(), 'best_model.pth') # Save the "Sweet Spot"
+    #     counter = 0
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print("Stopping early to prevent overfitting!")
+    #         break
+
+correct = 0
+total = 0
+with torch.no_grad():
+    for data in test_loader:
+        images, labels = data[0].to(device), data[1].to(device)
+
+        outputs = net(images)
+
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f'Accuracy of the network after aug test images: {100 * correct // total} %')
+
+for epoch in range(epochs_cutmix):
+
+    running_loss = 0.0
+    for i, data in enumerate(train_loader_aug):
         inputs, labels = data[0].to(device), data[1].to(device)
 
         optimizer.zero_grad()
@@ -136,7 +223,7 @@ for epoch in range(epochs):
 
         running_loss += loss.item()
         if i % 30 == 1:
-            print(f'[{epoch + 1}/{epochs}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            print(f'[{epoch + 1}/{epochs_cutmix}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
 
         # Inside your epoch loop:
@@ -150,7 +237,17 @@ for epoch in range(epochs):
     #         print("Stopping early to prevent overfitting!")
     #         break
 
+with torch.no_grad():
+    for data in test_loader:
+        images, labels = data[0].to(device), data[1].to(device)
 
+        outputs = net(images)
+
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f'Accuracy of the network after aug and cutmix test images: {100 * correct // total} %')
 print('Finished Training')
 
 
@@ -227,7 +324,7 @@ print(f'Model size: {size_all_mb:.3f}MB')
 threshold = 0.98  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
-epochs_semi= 50
+epochs_semi= 100
 best_val_loss = float('inf')
 patience = 10
 counter = 0
@@ -301,6 +398,11 @@ with torch.no_grad():
 
 print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
 
+for name, module in net.named_modules():
+    if isinstance(module, nn.Conv2d):
+        # Prune 20% of connections with the lowest L1-norm
+        prune.l1_unstructured(module, name='weight', amount=0.2)
+        prune.remove(module, 'weight') # Makes the pruning permanent
 param_size = 0
 for param in net.parameters():
     param_size += param.nelement() * param.element_size()
