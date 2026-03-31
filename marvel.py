@@ -11,8 +11,9 @@ import numpy as np
 import random
 from torchvision.transforms import v2
 import torch.nn.utils.prune as prune
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
-
+accuracy=0
 device = torch.device("cpu")
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -56,7 +57,7 @@ transform = transforms.Compose([
 unlabeled_set = torchvision.datasets.STL10(root='./data', split='unlabeled', download=True, transform=train_transform)
 
 # Use a larger batch size for unlabeled data to speed things up
-unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=64, shuffle=True)
+unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=160, shuffle=True)
 
 train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform= transform)
 train_set_aug= torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
@@ -100,8 +101,9 @@ class ConvNeuralNet(nn.Module):
 net = ConvNeuralNet()
 net.to(device)
      
-loss_function = nn.CrossEntropyLoss()
+loss_function = nn.CrossEntropyLoss(label_smoothing= 0.1)
 optimizer = optim.Adam(net.parameters(), lr=0.001)
+scheduler = CosineAnnealingLR(optimizer, T_max=100)
 
 cutmix = v2.CutMix(num_classes=10)
 mixup = v2.MixUp(num_classes=10)
@@ -121,13 +123,15 @@ for epoch in range(epochs_plain):
         outputs = net(inputs)
         loss = loss_function(outputs, labels)
         loss.backward()
-        optimizer.step()
-
         running_loss += loss.item()
         if i % 30 == 1:
             print(f'[{epoch + 1}/{epochs_plain}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
 
+        optimizer.step()
+    scheduler.step()
+
+        
         # Inside your epoch loop:
     # if loss.item() < best_val_loss:
     #     best_val_loss = loss.item()
@@ -150,7 +154,9 @@ with torch.no_grad():
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
-
+if 100 * correct // total >accuracy:
+    accuracy= 100 * correct // total
+    torch.save(net.state_dict(), './marvelmodel2.pth')
 print(f'Accuracy of the network after plain test images: {100 * correct // total} %')
 
 for epoch in range(epochs_aug):
@@ -164,13 +170,15 @@ for epoch in range(epochs_aug):
         outputs = net(inputs)
         loss = loss_function(outputs, labels)
         loss.backward()
-        optimizer.step()
-
         running_loss += loss.item()
         if i % 30 == 1:
             print(f'[{epoch + 1}/{epochs_aug}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
 
+        optimizer.step()
+    scheduler.step()
+
+        
         # Inside your epoch loop:
     # if loss.item() < best_val_loss:
     #     best_val_loss = loss.item()
@@ -193,7 +201,9 @@ with torch.no_grad():
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
-
+if 100 * correct // total >accuracy:
+    accuracy= 100 * correct // total
+    torch.save(net.state_dict(), './marvelmodel2.pth')
 print(f'Accuracy of the network after aug test images: {100 * correct // total} %')
 
 for epoch in range(epochs_cutmix):
@@ -219,13 +229,15 @@ for epoch in range(epochs_cutmix):
         outputs = net(inputs)
         loss = loss_function(outputs, labels)
         loss.backward()
-        optimizer.step()
-
         running_loss += loss.item()
         if i % 30 == 1:
             print(f'[{epoch + 1}/{epochs_cutmix}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
             running_loss = 0.0
 
+        optimizer.step()
+    scheduler.step()
+
+        
         # Inside your epoch loop:
     # if loss.item() < best_val_loss:
     #     best_val_loss = loss.item()
@@ -246,7 +258,9 @@ with torch.no_grad():
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
-
+if 100 * correct // total >accuracy:
+    accuracy= 100 * correct // total
+    torch.save(net.state_dict(), './marvelmodel2.pth')
 print(f'Accuracy of the network after aug and cutmix test images: {100 * correct // total} %')
 print('Finished Training')
 
@@ -288,7 +302,9 @@ with torch.no_grad():
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
-
+if 100 * correct // total >accuracy:
+    accuracy= 100 * correct // total
+    torch.save(net.state_dict(), './marvelmodel2.pth')
 print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
 # for images, labels in train_loader:
 #     outputs = net(images)
@@ -324,11 +340,28 @@ print(f'Model size: {size_all_mb:.3f}MB')
 threshold = 0.98  # Only "trust" the model if it's 95% sure
 unlabeled_iter = iter(unlabeled_loader)
 
-epochs_semi= 100
+epochs_semi= 60
 best_val_loss = float('inf')
 patience = 10
 counter = 0
 for epoch in range(epochs_semi):
+    if(epoch%20)==0:
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for data in test_loader:
+                images, labels = data[0].to(device), data[1].to(device)
+
+                outputs = net(images)
+
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+        if 100 * correct // total >accuracy:
+            accuracy= 100 * correct // total
+            torch.save(net.state_dict(), './marvelmodel2.pth')
+        print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
     net.train()
     for i, (l_inputs, l_labels) in enumerate(train_loader):
         l_inputs, l_labels = l_inputs.to(device), l_labels.to(device)
@@ -369,6 +402,8 @@ for epoch in range(epochs_semi):
 
         total_loss.backward()
         optimizer.step()
+    scheduler.step()
+
     #this is to prevent overfitting, it will stop training once loss is no becoming less
     
 
@@ -395,7 +430,9 @@ with torch.no_grad():
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
-
+if 100 * correct // total >accuracy:
+    accuracy= 100 * correct // total
+    torch.save(net.state_dict(), './marvelmodel2.pth')
 print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
 
 for name, module in net.named_modules():
@@ -413,3 +450,19 @@ buffer_size = 0
 
 size_all_mb = (param_size + buffer_size) / 1024**2
 print(f'Model size: {size_all_mb:.3f}MB')
+correct = 0
+total = 0
+
+with torch.no_grad():
+    for data in test_loader:
+        images, labels = data[0].to(device), data[1].to(device)
+
+        outputs = net(images)
+
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+if 100 * correct // total >accuracy:
+    accuracy= 100 * correct // total
+    torch.save(net.state_dict(), './marvelmodel2.pth')
+print(f'Accuracy of the network after pruning test images: {100 * correct // total} %')
