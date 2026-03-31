@@ -53,11 +53,50 @@ transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
-# Add this where you load train_set and test_set
-unlabeled_set = torchvision.datasets.STL10(root='./data', split='unlabeled', download=True, transform=train_transform)
 
-# Use a larger batch size for unlabeled data to speed things up
-unlabeled_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=224, shuffle=True)
+class DualTransform:# defined a class for equal shuffling of strong and weak augs for unlabeled set 
+    def __init__(self, weak, strong):
+        self.weak = weak
+        self.strong = strong
+    def __call__(self, x):
+        return self.weak(x), self.strong(x)
+
+def get_loaders(data_path, batch_size):
+    
+
+    weak_t = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),#less augmentation for weak
+         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    strong_t = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(30),
+        transforms.ColorJitter(0.4, 0.4, 0.4),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    
+
+    
+    unlabeled_set = torchvision.datasets.STL10(root=data_path, split='unlabeled', download=True, transform=DualTransform(weak_t, strong_t))
+   
+
+   
+    un_loader = torch.utils.data.DataLoader(unlabeled_set, batch_size=batch_size*7, shuffle=True)
+   
+
+    return un_loader
+
+
+
+
+
+
+un_loader=get_loaders('.\data',64)
+
 
 train_set = torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform= transform)
 train_set_aug= torchvision.datasets.STL10(root='./data', split= 'train', download=True, transform=train_transform)
@@ -382,15 +421,19 @@ size_all_mb = (param_size + buffer_size) / 1024**2
 print(f'Model size: {size_all_mb:.3f}MB')
 
 #SAVING MODEL TO SAVE RUNTIME
-
+# Add this right before the epochs_semi loop
 
 threshold = 0.9  # Only "trust" the model if it's 95% sure
-unlabeled_iter = iter(unlabeled_loader)
+un_iter = iter(un_loader)
 
 epochs_semi= 60
 best_val_loss = float('inf')
 patience = 10
 counter = 0
+train_iter = iter(train_loader)
+optimizer = optim.Adam(net.parameters(), lr=0.0001) # Low LR for fine-tuning
+scheduler = CosineAnnealingLR(optimizer, T_max=epochs_semi)
+
 for epoch in range(epochs_semi):
     if(epoch%10)==0:
         correct = 0
@@ -410,35 +453,36 @@ for epoch in range(epochs_semi):
             torch.save(net.state_dict(), './marvelmodel2.pth')
         print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
     net.train()
-    for i, (l_inputs, l_labels) in enumerate(train_loader):
+    for i, ((u_weak, u_strong), _) in enumerate(un_loader):
+        optimizer.zero_grad()
+       
+        try:
+                l_inputs, l_labels = next(train_iter)
+        except StopIteration:
+                train_iter = iter(train_loader)
+                l_inputs, l_labels = next(train_iter)
+
+        
+        u_weak, u_strong = u_weak.to(device), u_strong.to(device)
         l_inputs, l_labels = l_inputs.to(device), l_labels.to(device)
         
-        optimizer.zero_grad()
 
-        # 1. SUPERVISED LOSS
-        outputs = net(l_inputs)
-        supervised_loss = loss_function(outputs, l_labels)
-
-        # 2. SEMI-SUPERVISED LOSS
-        try:
-            u_inputs, _ = next(unlabeled_iter)
-        except StopIteration:
-            unlabeled_iter = iter(unlabeled_loader)
-            u_inputs, _ = next(unlabeled_iter)
         
-        u_inputs = u_inputs.to(device)
+
+        sup_outputs = net(l_inputs)
+        supervised_loss = loss_function(sup_outputs, l_labels)
         
         # Get "Pseudo-Labels" (No Gradients for the guessing part)
         with torch.no_grad():
-            u_outputs = net(u_inputs)
-            probs = torch.softmax(u_outputs, dim=1)
+            u_outputs_weak = net(u_weak)#weak dataset for psedolabel generation
+            probs = torch.softmax(u_outputs_weak, dim=1)
             max_probs, pseudo_labels = torch.max(probs, dim=1)
             mask = max_probs > threshold  # Only keep high confidence
         
         if mask.any():
             # Calculate loss for the unlabeled images we are sure about
-            u_outputs_final = net(u_inputs[mask])
-            unlabeled_loss = loss_function(u_outputs_final, pseudo_labels[mask])
+            u_outputs_strong = net(u_strong[mask])#strong labels for loss calculation
+            unlabeled_loss = loss_function(u_outputs_strong, pseudo_labels[mask])
             
             # Combine losses
             total_loss = supervised_loss + (0.5 * unlabeled_loss)
@@ -482,11 +526,6 @@ if 100 * correct // total >accuracy:
     torch.save(net.state_dict(), './marvelmodel2.pth')
 print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
 
-for name, module in net.named_modules():
-    if isinstance(module, nn.Conv2d):
-        # Prune 20% of connections with the lowest L1-norm
-        prune.ln_structured(module, name='weight', amount=0.2)
-        prune.remove(module, 'weight') # Makes the pruning permanent
 param_size = 0
 for param in net.parameters():
     param_size += param.nelement() * param.element_size()
