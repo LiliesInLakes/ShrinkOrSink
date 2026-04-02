@@ -1,3 +1,3 @@
 # ShrinkOrSink
 
-all the files are in the branches apart from main
+All the files are in the branches apart from the main branch
